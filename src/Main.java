@@ -57,27 +57,25 @@ public class Main {
         //Delete and create file with results
         File resultFile = new File(resultFilePath);
         if (resultFile.exists()) {
-            if(resultFile.delete()) {
-                try {
-                    if (resultFile.createNewFile()) {
-                        try (RandomAccessFile raf = new RandomAccessFile(resultFile, "rw")) {
-                            raf.seek(0);
-                            raf.writeDouble(0.0);
-                        }
-                    }
-                    else {
-                        System.out.println("File results wasn't created!");
-                    }
-                } catch (IOException e) {
-                    System.out.println("File results wasn't created!");
-                    e.printStackTrace();
-                    return;
-                }
-            }
-            else {
+            if (!resultFile.delete()) {
                 System.out.println("File with results wasn't re-created");
                 return;
             }
+        }
+        try {
+            if (resultFile.createNewFile()) {
+                try (RandomAccessFile raf = new RandomAccessFile(resultFile, "rw")) {
+                    raf.seek(0);
+                    raf.writeDouble(0.0);
+                }
+            }
+            else {
+                System.out.println("File results wasn't created!");
+            }
+        } catch (IOException e) {
+            System.out.println("File results wasn't created!");
+            e.printStackTrace();
+            return;
         }
 
         //Print start time

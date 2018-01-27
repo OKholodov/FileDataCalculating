@@ -126,6 +126,11 @@ public class CalculateFile implements Runnable{
         double currResult;
         double writeResult;
 
+        if (!resultFile.exists() || resultFile == null) {
+            doLog("Results file does not exists", EnumLogStatus.ERROR);
+            return;
+        }
+
         try (RandomAccessFile raf = new RandomAccessFile(resultFile, "rw")) {
             raf.seek(0);
             currResult = raf.readDouble();
