@@ -1,45 +1,72 @@
 import java.io.*;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
 public class CalculateFile implements Runnable{
-    Thread thread;
+    //Link to current thread
+    private Thread thread;
 
-    private static ConcurrentLinkedQueue<File> filesQueue = new ConcurrentLinkedQueue<>();
-    private static ArrayList<Thread> threads = new ArrayList<>();
-    private static int cntProcessed = 0;
-    private static boolean debugMode;
-    private int cntProcessedThread ;
-    private static String resultFilePath;
+    private static ArrayList<Thread> threads = new ArrayList<>(); //ArrayList with all started threads to join them into Main thread
+    private static ConcurrentLinkedQueue<File> filesQueue = new ConcurrentLinkedQueue<>(); //queue with all files to process
+    private static int cntProcessed = 0; //General number of processed files by all threads
+    private int cntProcessedThread; //Number of processed files by each thread
 
-    private static Map<File, String> hashmap;
+    static EnumLogModes logMode; //If thue - print logging information
+    static File resultFile; //Link to the Results file
+    static Map<File, String> hashmap; //Map to store information about which thread was processed each file
 
-    private File file;
-    FileReader fin = null;
+    private File file; //Link to current file from queue
+    private FileReader fin = null;
 
     private int operation;
     private double[] operands;
     private double result;
     private boolean isParsed = false;
 
-    public CalculateFile(boolean debugMode, Map<File, String> hashmap, String resultFilePath) {
+    CalculateFile() {
         this.thread = new Thread(this);
-        this.debugMode = debugMode;
         threads.add(thread);
         thread.start();
-        this.hashmap = hashmap;
-        this.resultFilePath = resultFilePath;
+    }
+
+    private static void doLog(String msg, EnumLogStatus st) {
+        switch (logMode) {
+            case HIGH:
+                System.out.println("[" + st.toString() + "] " + "[Thread " + Thread.currentThread().getId() + "] " + msg);
+                break;
+            case MED:
+                if (st.equals(EnumLogStatus.MUSTSEE)) {
+                    System.out.println("[Thread " + Thread.currentThread().getId() + "] " + msg);
+                }
+                if (st.equals(EnumLogStatus.WARNING) || st.equals(EnumLogStatus.ERROR)) {
+                    System.out.println("[" + st.toString() + "] " + "[Thread " + Thread.currentThread().getId() + "] " + msg);
+                }
+                break;
+            case LOW:
+                if (st.equals(EnumLogStatus.MUSTSEE)) {
+                    System.out.println("[Thread " + Thread.currentThread().getId() + "] " + msg);
+                }
+                if (st.equals(EnumLogStatus.ERROR)) {
+                    System.out.println("[" + st.toString() + "] " + "[Thread " + Thread.currentThread().getId() + "] " + msg);
+                }
+                break;
+            case OFF:
+                if (st.equals(EnumLogStatus.MUSTSEE)) {
+                    System.out.println("[Thread " + Thread.currentThread().getId() + "] " + msg);
+                }
+                break;
+        }
     }
 
     @Override
     public void run () {
-        System.out.println("[Thread " + thread.getId() + "] started.");
+        doLog("started.", EnumLogStatus.INFO);
+
         startProcess();
-        System.out.println("[Thread " + thread.getId() + "] terminating.");
-        System.out.println("[Thread " + thread.getId() + "] calculate " + cntProcessedThread + " files.");
+
+        doLog("terminating.", EnumLogStatus.INFO);
+        doLog("calculated " + cntProcessedThread + " files.", EnumLogStatus.MUSTSEE);
     }
 
     private void startProcess() {
@@ -47,40 +74,31 @@ public class CalculateFile implements Runnable{
         while (!filesQueue.isEmpty()) {
             file = getFileFromQueue(); //filesQueue.poll();
             if (file == null) {
-                System.out.println("Queue is empty");
+                doLog("Queue is empty", EnumLogStatus.WARNING);
                 return;
             }
 
             markMap(file,thread);
 
-            if (debugMode) {System.out.println("[Thread " + thread.getId() + "] got file " + file.getName() + " to process");}
+            doLog("Got file " + file.getName() + " to process", EnumLogStatus.INFO);
 
             if (parseFile()) {
                 result = calculate();
-                if (debugMode) {System.out.println("[Thread " + thread.getId() + "] File " + file.getName() + " processed. Result = " + result);}
+                doLog("File " + file.getName() + " processed. Result = " + result, EnumLogStatus.INFO);
                 writeResult(result);
             } else {
-                if (debugMode) {System.out.println("[Thread " + thread.getId() + "] File " + file.getName() + " was not been parsed and skipped.");}
+                doLog("File " + file.getName() + " was not been parsed and skipped.", EnumLogStatus.WARNING);
             }
-            /*
-            try {
-                Thread.sleep(500);
-            }
-            catch (InterruptedException e) {
-                System.out.println("Error sleeping");
-            }
-            */
             setCntProcessed();
             cntProcessedThread ++;
         }
-
     }
 
     public static int getCntProcessed() {
         return cntProcessed;
     }
 
-    public static synchronized void setCntProcessed() {
+    private static synchronized void setCntProcessed() {
         CalculateFile.cntProcessed ++;
     }
 
@@ -88,7 +106,7 @@ public class CalculateFile implements Runnable{
         return threads;
     }
 
-    public static synchronized void markMap(File f, Thread th) {
+    private static synchronized void markMap(File f, Thread th) {
         hashmap.put(f, hashmap.get(f) + "," + th.getId());
     }
 
@@ -104,53 +122,29 @@ public class CalculateFile implements Runnable{
         return operation == 1 ? "Addition" : operation == 2 ? "Multiplication" : operation == 3 ? "Sum of quaters" : "";
     }
 
-
-
     private static synchronized void writeResult(double addResult) {
         double currResult;
-        boolean isDeleted;
+        double writeResult;
 
-        File fileObject = new File(resultFilePath);
-        if (fileObject.exists()) {
-            isDeleted = fileObject.delete();
-            System.out.println("deleted="+isDeleted);
-            try {
-                fileObject.createNewFile();
-            }
-            catch (IOException e) {
-                System.out.println("File wasn't created!" );
-                e.printStackTrace();
-                return;
-            }
-        }
+        try (RandomAccessFile raf = new RandomAccessFile(resultFile, "rw")) {
+            raf.seek(0);
+            currResult = raf.readDouble();
 
-        try (RandomAccessFile raf = new RandomAccessFile(resultFilePath, "rw")) {
+            doLog("Current result from file = " + currResult, EnumLogStatus.INFO);
+
             raf.seek(0);
-            raf.writeUTF("");
-            //raf.writeUTF("0.0");
-            //raf.seek(0);
-/*
-            //currResult = raf.readDouble();
-            currResult = Double.parseDouble(raf.readUTF());
+            writeResult = currResult + addResult;
+            raf.writeDouble(writeResult);
+
             raf.seek(0);
-            //raf.writeDouble(currResult + addResult);
-            raf.writeUTF(Double.toString(currResult+addResult));
-            raf.seek(0);*/
+            doLog("New result written to file = " + writeResult, EnumLogStatus.INFO);
         }
         catch (FileNotFoundException e) {
-            System.out.println("Exception! File " + resultFilePath + " not found.");
+            doLog("File " + resultFile.getName() + " not found.", EnumLogStatus.ERROR);
         }
         catch (IOException e) {
-            System.out.println("Exception! File " + resultFilePath + ". IOException");
+            doLog("File " + resultFile.getName() + ". IOException", EnumLogStatus.ERROR);
         }
-/*
-        try (BufferedWriter bf = new BufferedWriter(new FileWriter(new File(filePath)))) {
-            bf.write(str);
-            bf.newLine();
-        } catch (java.io.IOException e) {
-            System.out.println("Error writing a result");
-        }
-        */
     }
 
     private boolean parseFile() {
@@ -163,63 +157,73 @@ public class CalculateFile implements Runnable{
                 String lineOne, lineTwo;
 
                 if ((lineOne = br.readLine()) != null) {
-                    //System.out.println("1 line = " + lineOne);
                     try {
                         operation = Integer.parseInt(lineOne);
 
                         if (operation != 1 && operation != 2 && operation !=3 ) {
-                            System.out.println("File " + file.getName() + " Exception!");
-                            System.out.println("Line 1 cannot be converted to operation. Possible values:");
-                            System.out.println("1 - addition");
-                            System.out.println("2 - multiplication");
-                            System.out.println("3 - sum of quaters");
+                            doLog("File " + file.getName() + " wrong:\n" +
+                                    "Line 1 cannot be converted to operation. Possible values:\n" +
+                                    "1 - addition\n" +
+                                    "2 - multiplication\n" +
+                                    "3 - sum of quaters",
+                                    EnumLogStatus.WARNING);
                             return isParsed;
                         }
                     }
                     catch (NumberFormatException e) {
-                        System.out.println("File " + file.getName() + " Exception!");
-                        System.out.println("Line 1 cannot be converted to operation.");
+                        doLog("File " + file.getName() + " wrong:\n" +
+                                        "Line 1 cannot be converted to operation.",
+                                EnumLogStatus.WARNING);
                         return isParsed;
                     }
                 }
                 else {
-                    System.out.println("File " + file.getName() + " is missed the first line with code operation");
+                    doLog("File " + file.getName() + " is empty", EnumLogStatus.WARNING);
                     return isParsed;
                 }
 
                 if ((lineTwo = br.readLine()) != null) {
-                    //System.out.println("2 line = " + lineTwo);
-
                     try {
                         String[] op = lineTwo.split(" ");
                         operands = new double[op.length];
 
                         int i=0;
                         for (String s: op) {
-                            //System.out.println("Try to convert ="+s);
                             operands[i++] = Double.parseDouble(s);
                         }
                     }
                     catch (NumberFormatException e) {
-                        System.out.println("Line two cannon be converted to double-values");
+                        doLog("File " + file.getName() + " wrong:\n" +
+                                        "Line two cannon be converted to double-values",
+                                EnumLogStatus.WARNING);
                         return isParsed;
                     }
                 }
                 else {
-                    System.out.println("File " + file.getName() + " is missed the second line with operands");
+                    doLog("File " + file.getName() + " wrong:\n" +
+                                    "Missed the second line with operands",
+                            EnumLogStatus.WARNING);
                     return isParsed;
                 }
 
             }
             catch (IOException e) {
-                e.printStackTrace();
+                doLog("File reading error " + file.getName(), EnumLogStatus.ERROR);
                 return isParsed;
             }
 
         }
         catch (FileNotFoundException e) {
-            System.out.println("File "+ file.getAbsolutePath() + " does not exist");
+            doLog("File "+ file.getAbsolutePath() + " does not exist", EnumLogStatus.ERROR);
             return isParsed;
+        }
+        finally {
+            try {
+                fin.close();
+            }
+            catch (IOException e) {
+                doLog("File closing error " + file.getAbsolutePath(), EnumLogStatus.ERROR);
+            }
         }
 
         isParsed = true;
@@ -250,7 +254,7 @@ public class CalculateFile implements Runnable{
             }
         }
         else {
-            System.out.println("First you should parse the file!");
+            doLog("First you should parse the file!", EnumLogStatus.ERROR);
             return result;
         }
 
